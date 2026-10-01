@@ -238,6 +238,35 @@ button.on {
 	display: none;
 }
 
+#proposals {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+#proposals div {
+	position: absolute;
+	display: flex;
+	gap: 2px;
+	transform: translate(-100%, -100%);
+	pointer-events: auto;
+}
+
+#proposals button {
+	padding: 0 6px;
+	line-height: 18px;
+	background: rgba(0, 0, 0, 0.75);
+	cursor: pointer;
+}
+
+#proposals .apply {
+	color: #6d6;
+}
+
+#proposals .discard {
+	color: #f77;
+}
+
 #empty {
 	position: absolute;
 	inset: 0;
@@ -399,8 +428,10 @@ label {
 	<div id="stage">
 		<canvas id="image"></canvas>
 		<canvas id="overlay"></canvas>
+		<canvas id="proposal"></canvas>
 	</div>
 	<canvas id="outline"></canvas>
+	<div id="proposals"></div>
 	<div id="brush"></div>
 	<div id="samBox"></div>
 	<div id="empty">Pick an image from the list on the left.</div>
@@ -444,6 +475,12 @@ label {
 			<input id="samThreshold" type="range" min="0.05" max="0.95" step="0.05" value="0.5">
 			<span class="value" id="samThresholdValue"></span>
 		</div>
+		<div class="row" id="samPending" style="margin-top:8px; display:none">
+			<span id="samCount"></span>
+			<button id="samApplyAll" title="Apply all pending masks (Enter)">Apply</button>
+			<button id="samDiscardAll" title="Discard all pending masks (Esc)">Discard</button>
+			<button id="samToggle" title="Hide or show pending masks (H)">Hide</button>
+		</div>
 	</section>
 
 	<section>
@@ -479,7 +516,9 @@ label {
 			<dt>E</dt><dd>Paint ignore</dd>
 			<dt>N</dt><dd>New instance of the chosen class</dd>
 			<dt>B / G / X</dt><dd>Brush / fill / SAM</dd>
-			<dt>SAM drag</dt><dd>Box one object, adds all similar ones as the chosen class</dd>
+			<dt>SAM drag</dt><dd>Box one object to get masks of all similar ones</dd>
+			<dt>Enter / Esc</dt><dd>Apply / discard all SAM masks</dd>
+			<dt>H</dt><dd>Hide / show SAM masks</dd>
 			<dt>[ / ]</dt><dd>Smaller / larger brush</dd>
 			<dt>V</dt><dd>Cycle view</dd>
 			<dt>F</dt><dd>Fit image to window</dd>
@@ -535,6 +574,14 @@ let outlineData = null;
 let outline32 = null;
 let outlineMask = null;
 let outlinePending = false;
+let outlineLabels = null;
+const proposalCanvas = $("proposal");
+const proposalCtx = proposalCanvas.getContext("2d");
+const PROPOSAL_BORDER = pack([255, 255, 255]);
+const PROPOSAL_HOVER = pack([255, 214, 0]);
+let sam = null;
+let samHidden = false;
+let samHover = 0;
 let semanticColors = {};
 
 function pack(rgb) {
@@ -1002,48 +1049,201 @@ function updateSamBox() {
 	el.style.height = `${(y1 - y0) * state.scale}px`;
 }
 
-function addSamInstances(labels, categoryId) {
-	const used = new Uint8Array(256);
+function setProposals(labels, categoryId) {
+	const boxes = new Map();
 
-	for (let i = 0; i < labels.length; i++) {
-		used[labels[i]] = 1;
+	for (let y = 0, i = 0; y < state.height; y++) {
+		for (let x = 0; x < state.width; x++, i++) {
+			const k = labels[i];
+
+			if (!k) {
+				continue;
+			}
+
+			const b = boxes.get(k);
+
+			if (b) {
+				b[0] = Math.min(b[0], x);
+				b[2] = Math.max(b[2], x + 1);
+				b[3] = y + 1;
+			} else {
+				boxes.set(k, [x, y, x + 1, y + 1]);
+			}
+		}
+	}
+
+	sam = boxes.size ? {labels, categoryId, boxes} : null;
+	samHidden = false;
+	samHover = 0;
+	renderProposals();
+}
+
+function renderProposals() {
+	const data = proposalCtx.createImageData(state.width, state.height);
+
+	if (sam) {
+		const [r, g, b] = state.catById.get(sam.categoryId).color;
+		const color = (140 << 24 | b << 16 | g << 8 | r) >>> 0;
+		const px = new Uint32Array(data.data.buffer);
+		const labels = sam.labels;
+
+		for (let i = 0; i < labels.length; i++) {
+			if (labels[i]) {
+				px[i] = color;
+			}
+		}
+	}
+
+	proposalCtx.putImageData(data, 0, 0);
+	renderProposalButtons();
+	updateProposalVisibility();
+}
+
+function proposalButton(text, className, title, onClick) {
+	const button = document.createElement("button");
+	button.textContent = text;
+	button.className = className;
+	button.title = title;
+	button.addEventListener("click", onClick);
+	return button;
+}
+
+function renderProposalButtons() {
+	const container = $("proposals");
+	container.replaceChildren();
+
+	if (!sam) {
+		return;
+	}
+
+	for (const k of sam.boxes.keys()) {
+		const pair = document.createElement("div");
+		pair.dataset.label = k;
+		pair.append(proposalButton("✓", "apply", "Apply this mask", () => applyProposals([k])), proposalButton("✕", "discard", "Discard this mask", () => discardProposal(k)));
+		pair.addEventListener("pointerenter", () => setSamHover(k));
+		pair.addEventListener("pointerleave", () => setSamHover(0));
+		container.append(pair);
+	}
+
+	placeProposalButtons();
+}
+
+function placeProposalButtons() {
+	if (!sam) {
+		return;
+	}
+
+	for (const pair of $("proposals").children) {
+		const [, y0, x1] = sam.boxes.get(Number(pair.dataset.label));
+		pair.style.left = `${x1 * state.scale + state.tx}px`;
+		pair.style.top = `${y0 * state.scale + state.ty}px`;
+	}
+}
+
+function updateProposalVisibility() {
+	const shown = sam && !samHidden ? "" : "none";
+	proposalCanvas.style.display = shown;
+	$("proposals").style.display = shown;
+	$("samPending").style.display = sam ? "" : "none";
+
+	if (sam) {
+		$("samCount").textContent = `${sam.boxes.size} pending`;
+		$("samToggle").textContent = samHidden ? "Show" : "Hide";
+	}
+
+	scheduleOutline();
+}
+
+function setSamHover(k) {
+	samHover = k;
+	scheduleOutline();
+}
+
+function toggleProposals() {
+	if (sam) {
+		samHidden = !samHidden;
+		updateProposalVisibility();
+	}
+}
+
+function proposalsChanged() {
+	if (!sam.boxes.size) {
+		sam = null;
+	}
+
+	samHover = 0;
+	renderProposals();
+}
+
+function applyProposals(keys) {
+	if (!sam) {
+		return;
 	}
 
 	const lut = new Uint32Array(256);
 	const allocated = [];
+	let [x0, y0, x1, y1] = [state.width, state.height, 0, 0];
 
-	for (let k = 1; k < 256; k++) {
-		if (!used[k]) {
-			continue;
-		}
-
-		const id = newInstanceId(categoryId, allocated);
+	for (const k of keys) {
+		const id = newInstanceId(sam.categoryId, allocated);
 
 		if (id === null) {
 			break;
 		}
 
-		state.segMap.set(id, {id, category_id: categoryId, iscrowd: 0});
+		const b = sam.boxes.get(k);
+		state.segMap.set(id, {id, category_id: sam.categoryId, iscrowd: 0});
 		lut[k] = id;
 		allocated.push(id);
+		sam.boxes.delete(k);
+		x0 = Math.min(x0, b[0]);
+		y0 = Math.min(y0, b[1]);
+		x1 = Math.max(x1, b[2]);
+		y1 = Math.max(y1, b[3]);
 	}
 
-	if (allocated.length) {
-		pushUndo();
-		const ids = state.ids;
+	if (!allocated.length) {
+		return;
+	}
 
-		for (let i = 0; i < ids.length; i++) {
+	pushUndo();
+	const ids = state.ids;
+	const labels = sam.labels;
+
+	for (let y = y0; y < y1; y++) {
+		for (let x = x0, i = y * state.width + x0; x < x1; x++, i++) {
 			const id = lut[labels[i]];
 
 			if (id) {
 				ids[i] = id;
+				labels[i] = 0;
 			}
 		}
-
-		finishEdit();
 	}
 
-	return allocated.length;
+	finishEdit();
+	proposalsChanged();
+}
+
+function discardProposal(k) {
+	const [x0, y0, x1, y1] = sam.boxes.get(k);
+	const labels = sam.labels;
+
+	for (let y = y0; y < y1; y++) {
+		for (let x = x0, i = y * state.width + x0; x < x1; x++, i++) {
+			if (labels[i] === k) {
+				labels[i] = 0;
+			}
+		}
+	}
+
+	sam.boxes.delete(k);
+	proposalsChanged();
+}
+
+function discardProposals() {
+	sam = null;
+	renderProposals();
 }
 
 async function runSam() {
@@ -1088,8 +1288,9 @@ async function runSam() {
 		return;
 	}
 
-	const count = addSamInstances(labels, categoryId);
-	$("samStatus").textContent = `SAM: ${count ? `added ${count}` : "found no"} ${state.catById.get(categoryId).name}`;
+	setProposals(labels, categoryId);
+	const name = state.catById.get(categoryId).name;
+	$("samStatus").textContent = sam ? `SAM: ${sam.boxes.size} ${name} masks to review` : `SAM: found no ${name}`;
 }
 
 function scheduleOutline() {
@@ -1110,6 +1311,7 @@ function drawOutline() {
 		outlineData = outlineCtx.createImageData(cw, ch);
 		outline32 = new Uint32Array(outlineData.data.buffer);
 		outlineMask = new Uint8Array(cw * ch);
+		outlineLabels = new Uint8Array(cw * ch);
 	}
 
 	outline32.fill(0);
@@ -1122,7 +1324,9 @@ function drawOutline() {
 		const sy0 = Math.max(0, Math.floor(state.ty));
 		const sy1 = Math.min(ch, Math.ceil(state.ty + state.height * s));
 		const cols = new Int32Array(cw);
+		const labels = sam && !samHidden ? sam.labels : null;
 		outlineMask.fill(0);
+		outlineLabels.fill(0);
 
 		for (let x = sx0; x < sx1; x++) {
 			cols[x] = Math.min(w - 1, Math.max(0, Math.floor((x + 0.5 - state.tx) / s)));
@@ -1133,6 +1337,10 @@ function drawOutline() {
 
 			for (let x = sx0; x < sx1; x++) {
 				outlineMask[y * cw + x] = state.ids[row + cols[x]] === state.active ? 1 : 0;
+
+				if (labels) {
+					outlineLabels[y * cw + x] = labels[row + cols[x]];
+				}
 			}
 		}
 
@@ -1142,6 +1350,21 @@ function drawOutline() {
 
 				if (outlineMask[i] && !(outlineMask[i - 1] && outlineMask[i + 1] && outlineMask[i - cw] && outlineMask[i + cw])) {
 					outline32[i] = 0xff000000;
+				}
+			}
+		}
+
+		if (labels) {
+			const l = outlineLabels;
+
+			for (let y = Math.max(2, sy0); y < Math.min(ch - 2, sy1); y++) {
+				for (let x = Math.max(2, sx0); x < Math.min(cw - 2, sx1); x++) {
+					const i = y * cw + x;
+					const k = l[i];
+
+					if (k && (l[i - 1] !== k || l[i + 1] !== k || l[i - 2] !== k || l[i + 2] !== k || l[i - cw] !== k || l[i + cw] !== k || l[i - 2 * cw] !== k || l[i + 2 * cw] !== k)) {
+						outline32[i] = k === samHover ? PROPOSAL_HOVER : PROPOSAL_BORDER;
+					}
 				}
 			}
 		}
@@ -1156,6 +1379,7 @@ function applyTransform() {
 	$("zoom").textContent = `${Math.round(state.scale * 100)}%`;
 	updateBrushCursor();
 	updateSamBox();
+	placeProposalButtons();
 }
 
 function fit() {
@@ -1443,6 +1667,7 @@ async function openImage(index) {
 	state.ids = new Uint32Array(buffer);
 	state.undo = [];
 	state.redo = [];
+	sam = null;
 	semanticColors = {};
 
 	for (const cat of meta.categories) {
@@ -1456,7 +1681,7 @@ async function openImage(index) {
 		state.active = stuffIds().includes(3) ? 3 : stuffIds()[0];
 	}
 
-	for (const canvas of [imageCanvas, overlayCanvas]) {
+	for (const canvas of [imageCanvas, overlayCanvas, proposalCanvas]) {
 		canvas.width = meta.width;
 		canvas.height = meta.height;
 	}
@@ -1473,6 +1698,7 @@ async function openImage(index) {
 	fillCategorySelects();
 	computeAreas();
 	renderAll();
+	renderProposals();
 	refreshPanel();
 	setDirty(false);
 	renderList();
@@ -1629,6 +1855,14 @@ document.addEventListener("keydown", (e) => {
 		setTool("fill");
 	} else if (key === "x") {
 		setTool("sam");
+	} else if (key === "enter" && sam) {
+		e.preventDefault();
+		applyProposals([...sam.boxes.keys()]);
+	} else if (key === "escape" && sam) {
+		e.preventDefault();
+		discardProposals();
+	} else if (key === "h") {
+		toggleProposals();
 	} else if (key === "[") {
 		setBrush(state.brush / 1.25);
 	} else if (key === "]") {
@@ -1664,6 +1898,10 @@ $("views").addEventListener("click", (e) => e.target.dataset.view && setView(e.t
 $("toolButtons").addEventListener("click", (e) => e.target.dataset.tool && setTool(e.target.dataset.tool));
 $("opacity").addEventListener("input", (e) => setOpacity(e.target.value));
 $("samThreshold").addEventListener("input", (e) => setSamThreshold(e.target.value));
+$("samApplyAll").addEventListener("click", () => applyProposals([...sam.boxes.keys()]));
+$("samDiscardAll").addEventListener("click", discardProposals);
+$("samToggle").addEventListener("click", toggleProposals);
+$("proposals").addEventListener("pointerdown", (e) => e.stopPropagation());
 $("size").addEventListener("input", (e) => setBrush(sliderToBrush(Number(e.target.value))));
 $("reclass").addEventListener("change", (e) => {
 	e.target.blur();

@@ -128,7 +128,21 @@ The dataset folder must contain one or more split folders (e.g. `train`, `val`),
 2. Press `X` or click "SAM".
 3. Drag a box around one object.
 
-Every object SAM considers similar is added as a new instance of that class, painted over whatever was there before. One SAM run is one undo step (`Ctrl+Z`).
+Every object SAM considers similar is shown as a pending mask with a white border; the labels are not changed yet. Each mask has a ✓ / ✕ button pair at its top-right corner:
+
+- ✓ adds that mask as a new instance of the chosen class, painted over whatever is under it. Each apply is one undo step (`Ctrl+Z`).
+- ✕ discards that mask.
+- Hovering a button pair turns its mask's border yellow, to show which mask it belongs to.
+
+The panel shows how many masks are pending, with buttons for all of them at once:
+
+| Button | Key | Action |
+| --- | --- | --- |
+| Apply | `Enter` | Apply all pending masks (one undo step) |
+| Discard | `Esc` | Discard all pending masks |
+| Hide / Show | `H` | Hide the pending masks to see the labels below |
+
+A new SAM box replaces any masks still pending, and switching images discards them. Saving keeps them.
 
 The "SAM conf." slider sets the minimum detection confidence for the next box: lower finds more objects, including false ones; higher finds fewer.
 
