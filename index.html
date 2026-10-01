@@ -1,0 +1,1706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LaRS editor</title>
+<style>
+:root {
+	--bg: #17222b;
+	--panel: #1f2d38;
+	--line: #2e4050;
+	--text: #dde7ec;
+	--muted: #8ba1ae;
+	--accent: #46f5ff;
+	--warn: #ffb347;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html, body {
+	height: 100%;
+	margin: 0;
+}
+
+body {
+	display: grid;
+	grid-template-columns: 250px 1fr 290px;
+	grid-template-rows: 44px 1fr 28px;
+	grid-template-areas: "files top tools" "files view tools" "files status tools";
+	background: var(--bg);
+	color: var(--text);
+	font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+	overflow: hidden;
+}
+
+button, select, input {
+	font: inherit;
+	color: inherit;
+}
+
+button, select {
+	background: var(--bg);
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	padding: 4px 9px;
+	cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+	border-color: var(--muted);
+}
+
+button:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+button.on {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+#files {
+	grid-area: files;
+	display: flex;
+	flex-direction: column;
+	background: var(--panel);
+	border-right: 1px solid var(--line);
+	min-height: 0;
+}
+
+#files .controls {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px;
+	border-bottom: 1px solid var(--line);
+}
+
+#files .highlight {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+#files .highlight select {
+	flex: 1;
+	min-width: 0;
+}
+
+#matchCount {
+	color: var(--muted);
+	white-space: nowrap;
+}
+
+#list li.match {
+	color: var(--warn);
+	font-weight: 600;
+}
+
+#root {
+	color: var(--muted);
+	font-size: 12px;
+	word-break: break-all;
+}
+
+#list {
+	flex: 1;
+	overflow-y: auto;
+	margin: 0;
+	padding: 4px 0;
+	list-style: none;
+}
+
+#list li {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 3px 10px;
+	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+#list li:hover {
+	background: var(--bg);
+}
+
+#list li.current {
+	background: var(--line);
+}
+
+#list li::before {
+	content: "";
+	flex: none;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	border: 1px solid var(--muted);
+}
+
+#list li.labeled::before {
+	background: var(--accent);
+	border-color: var(--accent);
+}
+
+#top {
+	grid-area: top;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 0 12px;
+	border-bottom: 1px solid var(--line);
+}
+
+#title {
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+#position, #state {
+	color: var(--muted);
+	white-space: nowrap;
+}
+
+#state.dirty {
+	color: var(--warn);
+}
+
+#top .spacer {
+	flex: 1;
+}
+
+#save.dirty {
+	border-color: var(--warn);
+	color: var(--warn);
+}
+
+#view {
+	grid-area: view;
+	position: relative;
+	overflow: hidden;
+	background: #0f171d;
+	cursor: none;
+}
+
+#view.panning {
+	cursor: grab;
+}
+
+#stage {
+	position: absolute;
+	left: 0;
+	top: 0;
+	transform-origin: 0 0;
+}
+
+#stage canvas {
+	position: absolute;
+	left: 0;
+	top: 0;
+	image-rendering: pixelated;
+}
+
+#outline {
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+}
+
+#brush {
+	position: absolute;
+	pointer-events: none;
+	border: 1px solid #fff;
+	border-radius: 50%;
+	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
+	transform: translate(-50%, -50%);
+	display: none;
+}
+
+#samBox {
+	position: absolute;
+	pointer-events: none;
+	border: 1px dashed #fff;
+	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
+	display: none;
+}
+
+#empty {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	color: var(--muted);
+}
+
+#status {
+	grid-area: status;
+	display: flex;
+	gap: 16px;
+	align-items: center;
+	padding: 0 12px;
+	border-top: 1px solid var(--line);
+	color: var(--muted);
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+#tools {
+	grid-area: tools;
+	background: var(--panel);
+	border-left: 1px solid var(--line);
+	overflow-y: auto;
+	padding: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+#tools h2 {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--muted);
+	margin: 0 0 6px;
+}
+
+.row {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	flex-wrap: wrap;
+}
+
+.row input[type=range] {
+	flex: 1;
+}
+
+.row .value {
+	width: 42px;
+	text-align: right;
+	color: var(--muted);
+}
+
+#segments {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	max-height: 320px;
+	overflow-y: auto;
+}
+
+#segments li {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 8px;
+	cursor: pointer;
+}
+
+#segments li:hover {
+	background: var(--bg);
+}
+
+#segments li.active {
+	background: var(--line);
+	box-shadow: inset 3px 0 0 var(--accent);
+}
+
+#segments .swatch {
+	flex: none;
+	width: 12px;
+	height: 12px;
+	border-radius: 2px;
+	border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+#segments .name {
+	flex: 1;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+#segments .area {
+	color: var(--muted);
+	font-variant-numeric: tabular-nums;
+}
+
+#selected select {
+	flex: 1;
+}
+
+#keys {
+	margin: 0;
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 0;
+	color: var(--muted);
+	font-size: 12px;
+}
+
+#keys dt {
+	color: var(--text);
+	white-space: nowrap;
+}
+
+#keys dd {
+	margin: 0 0 6px;
+}
+
+label {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	cursor: pointer;
+}
+</style>
+</head>
+<body>
+<aside id="files">
+	<div class="controls">
+		<div id="root"></div>
+		<select id="split" aria-label="Split"></select>
+		<div class="highlight">
+			<select id="highlight" aria-label="Highlight images containing class" disabled><option value="">Highlight: none</option></select>
+			<span id="matchCount"></span>
+		</div>
+		<label><input id="unlabeled" type="checkbox"> Only unlabeled</label>
+	</div>
+	<ul id="list"></ul>
+</aside>
+
+<header id="top">
+	<span id="title">No image open</span>
+	<span id="position"></span>
+	<span id="state"></span>
+	<span class="spacer"></span>
+	<label><input id="autosave" type="checkbox"> Save when switching image</label>
+	<button id="undo" disabled>Undo</button>
+	<button id="redo" disabled>Redo</button>
+	<button id="save" disabled>Save</button>
+</header>
+
+<main id="view">
+	<div id="stage">
+		<canvas id="image"></canvas>
+		<canvas id="overlay"></canvas>
+	</div>
+	<canvas id="outline"></canvas>
+	<div id="brush"></div>
+	<div id="samBox"></div>
+	<div id="empty">Pick an image from the list on the left.</div>
+</main>
+
+<footer id="status">
+	<span id="cursor"></span>
+	<span id="zoom"></span>
+	<span id="samStatus"></span>
+</footer>
+
+<aside id="tools">
+	<section>
+		<h2>View</h2>
+		<div class="row" id="views">
+			<button data-view="panoptic">Panoptic</button>
+			<button data-view="semantic">Semantic</button>
+			<button data-view="image">Image</button>
+		</div>
+		<div class="row" style="margin-top:8px">
+			<span>Opacity</span>
+			<input id="opacity" type="range" min="0" max="1" step="0.05" value="0.5">
+			<span class="value" id="opacityValue"></span>
+		</div>
+	</section>
+
+	<section>
+		<h2>Tool</h2>
+		<div class="row" id="toolButtons">
+			<button data-tool="brush">Brush</button>
+			<button data-tool="fill">Fill</button>
+			<button data-tool="sam">SAM</button>
+		</div>
+		<div class="row" style="margin-top:8px">
+			<span>Size</span>
+			<input id="size" type="range" min="0" max="100" step="1">
+			<span class="value" id="sizeValue"></span>
+		</div>
+		<div class="row" style="margin-top:8px">
+			<span>SAM conf.</span>
+			<input id="samThreshold" type="range" min="0.05" max="0.95" step="0.05" value="0.5">
+			<span class="value" id="samThresholdValue"></span>
+		</div>
+	</section>
+
+	<section>
+		<h2>Paint with</h2>
+		<ul id="segments"></ul>
+	</section>
+
+	<section id="selected">
+		<h2>Selected segment</h2>
+		<div class="row">
+			<select id="reclass" aria-label="Class of selected segment"></select>
+			<button id="delete">Clear</button>
+		</div>
+	</section>
+
+	<section>
+		<h2>New object</h2>
+		<div class="row">
+			<select id="newClass" aria-label="Class for new object"></select>
+		</div>
+		<div class="row" style="margin-top:6px">
+			<button id="newInstance">New instance</button>
+			<button id="newCrowd">New crowd region</button>
+		</div>
+	</section>
+
+	<section>
+		<h2>Shortcuts</h2>
+		<dl id="keys">
+			<dt>A / D, ← / →</dt><dd>Previous / next image</dd>
+			<dt>Shift + A / D</dt><dd>Previous / next highlighted image</dd>
+			<dt>1 2 3</dt><dd>Static obstacle, water, sky</dd>
+			<dt>E</dt><dd>Paint ignore</dd>
+			<dt>N</dt><dd>New instance of the chosen class</dd>
+			<dt>B / G / X</dt><dd>Brush / fill / SAM</dd>
+			<dt>SAM drag</dt><dd>Box one object, adds all similar ones as the chosen class</dd>
+			<dt>[ / ]</dt><dd>Smaller / larger brush</dd>
+			<dt>V</dt><dd>Cycle view</dd>
+			<dt>F</dt><dd>Fit image to window</dd>
+			<dt>Right-click, Alt-click</dt><dd>Paint with the segment under the cursor</dd>
+			<dt>Wheel</dt><dd>Zoom</dd>
+			<dt>Space-drag, middle-drag</dt><dd>Pan</dd>
+			<dt>Ctrl Z / Ctrl Y</dt><dd>Undo / redo</dd>
+			<dt>Ctrl S</dt><dd>Save</dd>
+		</dl>
+	</section>
+</aside>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const state = {
+	split: null,
+	images: [],
+	index: -1,
+	width: 0,
+	height: 0,
+	categories: [],
+	catById: new Map(),
+	segMap: new Map(),
+	ids: null,
+	active: 3,
+	view: "panoptic",
+	tool: "brush",
+	brush: 12,
+	classes: {},
+	undo: [],
+	redo: [],
+	dirty: false,
+	scale: 1,
+	tx: 0,
+	ty: 0,
+	areas: new Map(),
+};
+
+const UNDO_LIMIT = 20;
+const MAX_INSTANCES = 255;
+const INSTANCE_HUES = [0, 15, 95, 120, 140, 215, 235, 315, 335];
+const imageCanvas = $("image");
+const overlayCanvas = $("overlay");
+const imageCtx = imageCanvas.getContext("2d");
+const overlayCtx = overlayCanvas.getContext("2d");
+let overlayData = null;
+let overlay32 = null;
+let colorCache = new Map();
+const outlineCanvas = $("outline");
+const outlineCtx = outlineCanvas.getContext("2d");
+let outlineData = null;
+let outline32 = null;
+let outlineMask = null;
+let outlinePending = false;
+let semanticColors = {};
+
+function pack(rgb) {
+	return (255 << 24 | rgb[2] << 16 | rgb[1] << 8 | rgb[0]) >>> 0;
+}
+
+function hslToRgb(h, s, l) {
+	const k = (n) => (n + h / 30) % 12;
+	const a = s * Math.min(l, 1 - l);
+	const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+	return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+
+function instanceColor(id) {
+	let h = Math.imul(id ^ (id >>> 16), 0x45d9f3b) >>> 0;
+	h = Math.imul(h ^ (h >>> 16), 0x45d9f3b) >>> 0;
+	return hslToRgb(INSTANCE_HUES[h % INSTANCE_HUES.length], 0.85, 0.42 + (h >>> 9) % 20 / 100);
+}
+
+function baseColor(id, view) {
+	if (id === 0) {
+		return [0, 0, 0];
+	}
+
+	const seg = state.segMap.get(id);
+	const cat = state.catById.get(seg.category_id);
+
+	if (view === "semantic") {
+		return semanticColors[cat.supercategory];
+	}
+
+	if (!cat.isthing || seg.iscrowd) {
+		return cat.color;
+	}
+
+	return instanceColor(id);
+}
+
+function colorOf(id) {
+	let color = colorCache.get(id);
+
+	if (color !== undefined) {
+		return color;
+	}
+
+	color = pack(baseColor(id, state.view));
+	colorCache.set(id, color);
+	return color;
+}
+
+function isThing(id) {
+	const seg = state.segMap.get(id);
+	return !!seg && !!state.catById.get(seg.category_id).isthing;
+}
+
+function segmentLabel(id) {
+	if (id === 0) {
+		return "Ignore";
+	}
+
+	const seg = state.segMap.get(id);
+	const cat = state.catById.get(seg.category_id);
+
+	if (!cat.isthing) {
+		return cat.name;
+	}
+
+	if (seg.iscrowd) {
+		return `${cat.name} (crowd)`;
+	}
+
+	const siblings = [...state.segMap.values()].filter((s) => s.category_id === seg.category_id && !s.iscrowd && (state.areas.get(s.id) || s.id === state.active)).map((s) => s.id).sort((a, b) => a - b);
+	return `${cat.name} ${siblings.indexOf(id) + 1}`;
+}
+
+function renderRect(x0, y0, x1, y1) {
+	x0 = Math.max(0, Math.floor(x0));
+	y0 = Math.max(0, Math.floor(y0));
+	x1 = Math.min(state.width, Math.ceil(x1));
+	y1 = Math.min(state.height, Math.ceil(y1));
+
+	if (x1 <= x0 || y1 <= y0) {
+		return;
+	}
+
+	const ids = state.ids;
+	let lastId = -1;
+	let lastColor = 0;
+
+	for (let y = y0; y < y1; y++) {
+		let i = y * state.width + x0;
+
+		for (let x = x0; x < x1; x++, i++) {
+			const id = ids[i];
+
+			if (id !== lastId) {
+				lastId = id;
+				lastColor = colorOf(id);
+			}
+
+			overlay32[i] = lastColor;
+		}
+	}
+
+	overlayCtx.putImageData(overlayData, 0, 0, x0, y0, x1 - x0, y1 - y0);
+	scheduleOutline();
+}
+
+function renderAll() {
+	colorCache = new Map();
+
+	if (state.ids) {
+		renderRect(0, 0, state.width, state.height);
+	}
+}
+
+function computeAreas() {
+	const areas = new Map();
+	const ids = state.ids;
+	let lastId = ids[0];
+	let run = 0;
+
+	for (let i = 0; i < ids.length; i++) {
+		if (ids[i] !== lastId) {
+			areas.set(lastId, (areas.get(lastId) || 0) + run);
+			lastId = ids[i];
+			run = 0;
+		}
+
+		run++;
+	}
+
+	areas.set(lastId, (areas.get(lastId) || 0) + run);
+	state.areas = areas;
+}
+
+function stuffIds() {
+	return state.categories.filter((c) => !c.isthing).map((c) => c.id);
+}
+
+function cssColor(rgb) {
+	return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+}
+
+function refreshPanel() {
+	const catOrder = new Map(state.categories.map((c, i) => [c.id, i]));
+	const shown = [0, ...stuffIds()];
+	const things = [...state.segMap.values()].filter((s) => isThing(s.id) && (state.areas.get(s.id) || s.id === state.active));
+	things.sort((a, b) => catOrder.get(a.category_id) - catOrder.get(b.category_id) || a.id - b.id);
+	shown.push(...things.map((s) => s.id));
+
+	const list = $("segments");
+	list.replaceChildren();
+
+	for (const id of shown) {
+		const li = document.createElement("li");
+		li.classList.toggle("active", id === state.active);
+
+		const swatch = document.createElement("span");
+		swatch.className = "swatch";
+		swatch.style.background = cssColor(baseColor(id, "panoptic"));
+
+		const name = document.createElement("span");
+		name.className = "name";
+		name.textContent = segmentLabel(id);
+
+		const area = document.createElement("span");
+		area.className = "area";
+		area.textContent = (state.areas.get(id) || 0).toLocaleString();
+
+		li.append(swatch, name, area);
+		li.addEventListener("click", () => setActive(id));
+		list.append(li);
+	}
+
+	const reclass = $("reclass");
+	reclass.disabled = state.active === 0;
+	$("delete").disabled = state.active === 0;
+
+	if (state.active !== 0) {
+		reclass.value = state.segMap.get(state.active).category_id;
+	}
+}
+
+function fillCategorySelects() {
+	const reclass = $("reclass");
+	const newClass = $("newClass");
+	const previous = newClass.value;
+	reclass.replaceChildren();
+	newClass.replaceChildren();
+
+	for (const cat of state.categories) {
+		reclass.append(new Option(cat.name, cat.id));
+
+		if (cat.isthing) {
+			newClass.append(new Option(cat.name, cat.id));
+		}
+	}
+
+	if (previous) {
+		newClass.value = previous;
+	}
+}
+
+function setActive(id) {
+	state.active = id;
+	refreshPanel();
+	scheduleOutline();
+}
+
+function setDirty(dirty) {
+	state.dirty = dirty;
+	$("state").textContent = dirty ? "Unsaved changes" : state.ids ? "Saved" : "";
+	$("state").classList.toggle("dirty", dirty);
+	$("save").classList.toggle("dirty", dirty);
+	$("save").disabled = !state.ids;
+	$("undo").disabled = !state.undo.length;
+	$("redo").disabled = !state.redo.length;
+}
+
+function pushUndo() {
+	state.undo.push({ids: state.ids.slice(), active: state.active});
+
+	if (state.undo.length > UNDO_LIMIT) {
+		state.undo.shift();
+	}
+
+	state.redo = [];
+}
+
+function restore(from, to) {
+	const entry = from.pop();
+
+	if (!entry) {
+		return;
+	}
+
+	to.push({ids: state.ids, active: state.active});
+	state.ids = entry.ids;
+	state.active = entry.active;
+	computeAreas();
+	renderAll();
+	refreshPanel();
+	setDirty(true);
+}
+
+function stamp(cx, cy, bounds) {
+	const r = state.brush / 2;
+	const w = state.width;
+	const h = state.height;
+	const ids = state.ids;
+	const active = state.active;
+	const x0 = Math.max(0, Math.floor(cx - r));
+	const x1 = Math.min(w - 1, Math.floor(cx + r));
+	const y0 = Math.max(0, Math.floor(cy - r));
+	const y1 = Math.min(h - 1, Math.floor(cy + r));
+	const r2 = r * r;
+
+	for (let y = y0; y <= y1; y++) {
+		const dy = y + 0.5 - cy;
+
+		for (let x = x0; x <= x1; x++) {
+			const dx = x + 0.5 - cx;
+
+			if (dx * dx + dy * dy <= r2) {
+				ids[y * w + x] = active;
+			}
+		}
+	}
+
+	const px = Math.floor(cx);
+	const py = Math.floor(cy);
+
+	if (px >= 0 && py >= 0 && px < w && py < h) {
+		ids[py * w + px] = active;
+	}
+
+	bounds[0] = Math.min(bounds[0], x0);
+	bounds[1] = Math.min(bounds[1], y0);
+	bounds[2] = Math.max(bounds[2], x1 + 1);
+	bounds[3] = Math.max(bounds[3], y1 + 1);
+}
+
+function strokeTo(x, y) {
+	const bounds = [Infinity, Infinity, -Infinity, -Infinity];
+	const [lx, ly] = stroke.last;
+	const dist = Math.hypot(x - lx, y - ly);
+	const step = Math.max(1, state.brush / 4);
+	const steps = Math.max(1, Math.ceil(dist / step));
+
+	for (let s = 1; s <= steps; s++) {
+		stamp(lx + (x - lx) * s / steps, ly + (y - ly) * s / steps, bounds);
+	}
+
+	stroke.last = [x, y];
+	renderRect(...bounds);
+}
+
+function floodFill(x, y) {
+	const w = state.width;
+	const h = state.height;
+	x = Math.floor(x);
+	y = Math.floor(y);
+
+	if (x < 0 || y < 0 || x >= w || y >= h) {
+		return;
+	}
+
+	const ids = state.ids;
+	const target = ids[y * w + x];
+
+	if (target === state.active) {
+		return;
+	}
+
+	pushUndo();
+	const stack = new Int32Array(w * h);
+	let top = 0;
+	stack[top++] = y * w + x;
+	ids[y * w + x] = state.active;
+
+	while (top) {
+		const i = stack[--top];
+		const px = i % w;
+
+		if (px > 0 && ids[i - 1] === target) {
+			ids[i - 1] = state.active;
+			stack[top++] = i - 1;
+		}
+
+		if (px < w - 1 && ids[i + 1] === target) {
+			ids[i + 1] = state.active;
+			stack[top++] = i + 1;
+		}
+
+		if (i >= w && ids[i - w] === target) {
+			ids[i - w] = state.active;
+			stack[top++] = i - w;
+		}
+
+		if (i < w * (h - 1) && ids[i + w] === target) {
+			ids[i + w] = state.active;
+			stack[top++] = i + w;
+		}
+	}
+
+	finishEdit();
+}
+
+function finishEdit() {
+	computeAreas();
+	renderAll();
+	refreshPanel();
+	setDirty(true);
+}
+
+function newInstanceId(categoryId, reserved = []) {
+	for (let k = 1; k <= MAX_INSTANCES; k++) {
+		const id = categoryId + 65536 * k;
+
+		if (!state.areas.get(id) && id !== state.active && !reserved.includes(id)) {
+			return id;
+		}
+	}
+
+	alert(`This image already has ${MAX_INSTANCES} instances of this class.`);
+	return null;
+}
+
+function createInstance(crowd) {
+	if (!state.ids) {
+		return;
+	}
+
+	const categoryId = Number($("newClass").value);
+	const id = crowd ? categoryId : newInstanceId(categoryId);
+
+	if (id === null) {
+		return;
+	}
+
+	if (!state.segMap.has(id)) {
+		state.segMap.set(id, {id, category_id: categoryId, iscrowd: crowd ? 1 : 0});
+	}
+
+	setActive(id);
+}
+
+function replaceId(from, to) {
+	const ids = state.ids;
+
+	for (let i = 0; i < ids.length; i++) {
+		if (ids[i] === from) {
+			ids[i] = to;
+		}
+	}
+}
+
+function reclassify(categoryId) {
+	const id = state.active;
+	const seg = state.segMap.get(id);
+
+	if (id === 0 || seg.category_id === categoryId) {
+		return;
+	}
+
+	const cat = state.catById.get(categoryId);
+	let target;
+
+	if (!cat.isthing || seg.iscrowd) {
+		target = categoryId;
+
+		if (!state.segMap.has(target)) {
+			state.segMap.set(target, {id: target, category_id: categoryId, iscrowd: cat.isthing ? 1 : 0});
+		}
+	} else {
+		target = newInstanceId(categoryId);
+
+		if (target === null) {
+			refreshPanel();
+			return;
+		}
+
+		state.segMap.set(target, {id: target, category_id: categoryId, iscrowd: 0});
+	}
+
+	pushUndo();
+	replaceId(id, target);
+	state.active = target;
+	finishEdit();
+}
+
+function clearSegment() {
+	if (state.active === 0) {
+		return;
+	}
+
+	pushUndo();
+	replaceId(state.active, 0);
+	state.active = 0;
+	finishEdit();
+}
+
+let samDrag = null;
+let samBusy = false;
+
+function samRect() {
+	const [ax, ay, bx, by] = samDrag;
+	return [Math.max(0, Math.min(ax, bx)), Math.max(0, Math.min(ay, by)), Math.min(state.width, Math.max(ax, bx)), Math.min(state.height, Math.max(ay, by))];
+}
+
+function updateSamBox() {
+	const el = $("samBox");
+
+	if (!samDrag) {
+		el.style.display = "none";
+		return;
+	}
+
+	const [x0, y0, x1, y1] = samRect();
+	el.style.display = "block";
+	el.style.left = `${x0 * state.scale + state.tx}px`;
+	el.style.top = `${y0 * state.scale + state.ty}px`;
+	el.style.width = `${(x1 - x0) * state.scale}px`;
+	el.style.height = `${(y1 - y0) * state.scale}px`;
+}
+
+function addSamInstances(labels, categoryId) {
+	const used = new Uint8Array(256);
+
+	for (let i = 0; i < labels.length; i++) {
+		used[labels[i]] = 1;
+	}
+
+	const lut = new Uint32Array(256);
+	const allocated = [];
+
+	for (let k = 1; k < 256; k++) {
+		if (!used[k]) {
+			continue;
+		}
+
+		const id = newInstanceId(categoryId, allocated);
+
+		if (id === null) {
+			break;
+		}
+
+		state.segMap.set(id, {id, category_id: categoryId, iscrowd: 0});
+		lut[k] = id;
+		allocated.push(id);
+	}
+
+	if (allocated.length) {
+		pushUndo();
+		const ids = state.ids;
+
+		for (let i = 0; i < ids.length; i++) {
+			const id = lut[labels[i]];
+
+			if (id) {
+				ids[i] = id;
+			}
+		}
+
+		finishEdit();
+	}
+
+	return allocated.length;
+}
+
+async function runSam() {
+	const [x0, y0, x1, y1] = samRect().map(Math.round);
+	const index = state.index;
+	const categoryId = Number($("newClass").value);
+
+	if (x1 - x0 < 2 || y1 - y0 < 2) {
+		samDrag = null;
+		updateSamBox();
+		return;
+	}
+
+	samBusy = true;
+	$("samStatus").textContent = "SAM: segmenting…";
+	let labels = null;
+
+	try {
+		const res = await fetch(`/api/sam?${query(state.images[index].name)}&box=${x0},${y0},${x1},${y1}&threshold=${$("samThreshold").value}`, {method: "POST"});
+
+		if (!res.ok) {
+			throw new Error((await res.json()).error);
+		}
+
+		labels = new Uint8Array(await res.arrayBuffer());
+	} catch (err) {
+		$("samStatus").textContent = "";
+		alert(`SAM failed: ${err.message}`);
+	}
+
+	samBusy = false;
+	samDrag = null;
+	updateSamBox();
+
+	if (!labels || index !== state.index) {
+		return;
+	}
+
+	if (labels.length !== state.ids.length) {
+		$("samStatus").textContent = "";
+		alert("SAM returned a mask with the wrong size.");
+		return;
+	}
+
+	const count = addSamInstances(labels, categoryId);
+	$("samStatus").textContent = `SAM: ${count ? `added ${count}` : "found no"} ${state.catById.get(categoryId).name}`;
+}
+
+function scheduleOutline() {
+	if (!outlinePending) {
+		outlinePending = true;
+		requestAnimationFrame(drawOutline);
+	}
+}
+
+function drawOutline() {
+	outlinePending = false;
+	const cw = $("view").clientWidth;
+	const ch = $("view").clientHeight;
+
+	if (outlineCanvas.width !== cw || outlineCanvas.height !== ch) {
+		outlineCanvas.width = cw;
+		outlineCanvas.height = ch;
+		outlineData = outlineCtx.createImageData(cw, ch);
+		outline32 = new Uint32Array(outlineData.data.buffer);
+		outlineMask = new Uint8Array(cw * ch);
+	}
+
+	outline32.fill(0);
+
+	if (state.ids) {
+		const w = state.width;
+		const s = state.scale;
+		const sx0 = Math.max(0, Math.floor(state.tx));
+		const sx1 = Math.min(cw, Math.ceil(state.tx + w * s));
+		const sy0 = Math.max(0, Math.floor(state.ty));
+		const sy1 = Math.min(ch, Math.ceil(state.ty + state.height * s));
+		const cols = new Int32Array(cw);
+		outlineMask.fill(0);
+
+		for (let x = sx0; x < sx1; x++) {
+			cols[x] = Math.min(w - 1, Math.max(0, Math.floor((x + 0.5 - state.tx) / s)));
+		}
+
+		for (let y = sy0; y < sy1; y++) {
+			const row = Math.min(state.height - 1, Math.max(0, Math.floor((y + 0.5 - state.ty) / s))) * w;
+
+			for (let x = sx0; x < sx1; x++) {
+				outlineMask[y * cw + x] = state.ids[row + cols[x]] === state.active ? 1 : 0;
+			}
+		}
+
+		for (let y = Math.max(1, sy0); y < Math.min(ch - 1, sy1); y++) {
+			for (let x = Math.max(1, sx0); x < Math.min(cw - 1, sx1); x++) {
+				const i = y * cw + x;
+
+				if (outlineMask[i] && !(outlineMask[i - 1] && outlineMask[i + 1] && outlineMask[i - cw] && outlineMask[i + cw])) {
+					outline32[i] = 0xff000000;
+				}
+			}
+		}
+	}
+
+	outlineCtx.putImageData(outlineData, 0, 0);
+}
+
+function applyTransform() {
+	scheduleOutline();
+	$("stage").style.transform = `translate(${state.tx}px, ${state.ty}px) scale(${state.scale})`;
+	$("zoom").textContent = `${Math.round(state.scale * 100)}%`;
+	updateBrushCursor();
+	updateSamBox();
+}
+
+function fit() {
+	if (!state.ids) {
+		return;
+	}
+
+	const view = $("view").getBoundingClientRect();
+	state.scale = Math.min(view.width / state.width, view.height / state.height) * 0.98;
+	state.tx = (view.width - state.width * state.scale) / 2;
+	state.ty = (view.height - state.height * state.scale) / 2;
+	applyTransform();
+}
+
+function toImage(clientX, clientY) {
+	const view = $("view").getBoundingClientRect();
+	return [(clientX - view.left - state.tx) / state.scale, (clientY - view.top - state.ty) / state.scale];
+}
+
+let mouse = null;
+
+function updateBrushCursor() {
+	const el = $("brush");
+
+	if (!mouse || !state.ids || state.tool !== "brush" || pan || spaceHeld) {
+		el.style.display = "none";
+		return;
+	}
+
+	const view = $("view").getBoundingClientRect();
+	const d = Math.max(4, state.brush * state.scale);
+	el.style.display = "block";
+	el.style.width = `${d}px`;
+	el.style.height = `${d}px`;
+	el.style.left = `${mouse[0] - view.left}px`;
+	el.style.top = `${mouse[1] - view.top}px`;
+}
+
+function updateHover() {
+	if (!mouse || !state.ids) {
+		$("cursor").textContent = "";
+		return;
+	}
+
+	const [x, y] = toImage(...mouse).map(Math.floor);
+
+	if (x < 0 || y < 0 || x >= state.width || y >= state.height) {
+		$("cursor").textContent = "";
+		return;
+	}
+
+	$("cursor").textContent = `x ${x}, y ${y}: ${segmentLabel(state.ids[y * state.width + x])}`;
+}
+
+function pickAt(clientX, clientY) {
+	const [x, y] = toImage(clientX, clientY).map(Math.floor);
+
+	if (x >= 0 && y >= 0 && x < state.width && y < state.height) {
+		setActive(state.ids[y * state.width + x]);
+	}
+}
+
+let stroke = null;
+let pan = null;
+let spaceHeld = false;
+
+$("view").addEventListener("contextmenu", (e) => e.preventDefault());
+
+$("view").addEventListener("pointerdown", (e) => {
+	if (!state.ids) {
+		return;
+	}
+
+	$("view").setPointerCapture(e.pointerId);
+
+	if (e.button === 1 || (e.button === 0 && spaceHeld)) {
+		pan = {x: e.clientX, y: e.clientY, tx: state.tx, ty: state.ty};
+		$("view").classList.add("panning");
+		updateBrushCursor();
+		return;
+	}
+
+	if (e.button === 2 || (e.button === 0 && e.altKey)) {
+		pickAt(e.clientX, e.clientY);
+		return;
+	}
+
+	if (e.button !== 0) {
+		return;
+	}
+
+	const [x, y] = toImage(e.clientX, e.clientY);
+
+	if (state.tool === "fill") {
+		floodFill(x, y);
+		return;
+	}
+
+	if (state.tool === "sam") {
+		if (!samBusy) {
+			samDrag = [x, y, x, y];
+			updateSamBox();
+		}
+
+		return;
+	}
+
+	pushUndo();
+	stroke = {last: [x, y]};
+	strokeTo(x, y);
+});
+
+$("view").addEventListener("pointermove", (e) => {
+	mouse = [e.clientX, e.clientY];
+
+	if (pan) {
+		state.tx = pan.tx + e.clientX - pan.x;
+		state.ty = pan.ty + e.clientY - pan.y;
+		applyTransform();
+	} else if (stroke) {
+		strokeTo(...toImage(e.clientX, e.clientY));
+	} else if (samDrag && !samBusy) {
+		[samDrag[2], samDrag[3]] = toImage(e.clientX, e.clientY);
+		updateSamBox();
+	}
+
+	updateBrushCursor();
+	updateHover();
+});
+
+$("view").addEventListener("pointerup", () => {
+	if (pan) {
+		pan = null;
+		$("view").classList.toggle("panning", spaceHeld);
+	}
+
+	if (stroke) {
+		stroke = null;
+		finishEdit();
+	}
+
+	if (samDrag && !samBusy) {
+		runSam();
+	}
+
+	updateBrushCursor();
+});
+
+$("view").addEventListener("pointerleave", () => {
+	mouse = null;
+	updateBrushCursor();
+	updateHover();
+});
+
+$("view").addEventListener("wheel", (e) => {
+	if (!state.ids) {
+		return;
+	}
+
+	e.preventDefault();
+	const view = $("view").getBoundingClientRect();
+	const mx = e.clientX - view.left;
+	const my = e.clientY - view.top;
+	const scale = Math.min(40, Math.max(0.05, state.scale * Math.exp(-e.deltaY * 0.0015)));
+	const f = scale / state.scale;
+	state.tx = mx - (mx - state.tx) * f;
+	state.ty = my - (my - state.ty) * f;
+	state.scale = scale;
+	applyTransform();
+}, {passive: false});
+
+function sliderToBrush(v) {
+	return Math.max(1, Math.round(Math.exp(v / 100 * Math.log(400))));
+}
+
+function brushToSlider(b) {
+	return Math.round(Math.log(b) / Math.log(400) * 100);
+}
+
+function setBrush(size) {
+	state.brush = Math.min(400, Math.max(1, Math.round(size)));
+	$("size").value = brushToSlider(state.brush);
+	$("sizeValue").textContent = `${state.brush}px`;
+	updateBrushCursor();
+}
+
+function setTool(tool) {
+	state.tool = tool;
+
+	for (const b of $("toolButtons").children) {
+		b.classList.toggle("on", b.dataset.tool === tool);
+	}
+
+	$("view").style.cursor = tool === "brush" ? "" : "crosshair";
+	updateBrushCursor();
+}
+
+function setView(view) {
+	state.view = view;
+
+	for (const b of $("views").children) {
+		b.classList.toggle("on", b.dataset.view === view);
+	}
+
+	overlayCanvas.style.display = view === "image" ? "none" : "";
+	renderAll();
+}
+
+function setSamThreshold(value) {
+	$("samThresholdValue").textContent = `${Math.round(value * 100)}%`;
+}
+
+function setOpacity(value) {
+	overlayCanvas.style.opacity = value;
+	$("opacityValue").textContent = `${Math.round(value * 100)}%`;
+}
+
+async function fetchJson(url) {
+	const res = await fetch(url);
+	const body = await res.json();
+
+	if (!res.ok) {
+		throw new Error(body.error);
+	}
+
+	return body;
+}
+
+function query(name) {
+	return `split=${encodeURIComponent(state.split)}&name=${encodeURIComponent(name)}`;
+}
+
+async function save() {
+	if (!state.ids) {
+		return true;
+	}
+
+	const name = state.images[state.index].name;
+	const meta = new TextEncoder().encode(JSON.stringify({width: state.width, height: state.height, segments: [...state.segMap.values()]}));
+	const header = new Uint32Array([meta.length]);
+	const res = await fetch(`/api/save?${query(name)}`, {method: "POST", body: new Blob([header, meta, state.ids])});
+
+	if (!res.ok) {
+		alert(`Saving failed: ${(await res.json()).error}`);
+		return false;
+	}
+
+	state.images[state.index].labeled = true;
+	state.classes[name] = [...new Set([...state.areas.keys()].filter((id) => id !== 0).map((id) => classKey(state.segMap.get(id))))];
+	renderList();
+	setDirty(false);
+	return true;
+}
+
+async function confirmLeave() {
+	if (!state.dirty) {
+		return true;
+	}
+
+	if ($("autosave").checked) {
+		return save();
+	}
+
+	return confirm("This image has unsaved changes. Discard them?");
+}
+
+async function openImage(index) {
+	if (index < 0 || index >= state.images.length || !(await confirmLeave())) {
+		return;
+	}
+
+	const name = state.images[index].name;
+	const img = new Image();
+	img.src = `/api/image?${query(name)}`;
+
+	const [meta, buffer] = await Promise.all([fetchJson(`/api/meta?${query(name)}`), fetch(`/api/ids?${query(name)}`).then((r) => r.arrayBuffer()), img.decode()]);
+	const sameSize = meta.width === state.width && meta.height === state.height;
+
+	state.index = index;
+	state.width = meta.width;
+	state.height = meta.height;
+	state.categories = meta.categories;
+	state.catById = new Map(meta.categories.map((c) => [c.id, c]));
+	state.segMap = new Map(meta.segments.map((s) => [s.id, s]));
+	state.ids = new Uint32Array(buffer);
+	state.undo = [];
+	state.redo = [];
+	semanticColors = {};
+
+	for (const cat of meta.categories) {
+		if (!cat.isthing) {
+			semanticColors[cat.supercategory] = cat.color;
+			state.segMap.set(cat.id, {id: cat.id, category_id: cat.id, iscrowd: 0});
+		}
+	}
+
+	if (!stuffIds().includes(state.active)) {
+		state.active = stuffIds().includes(3) ? 3 : stuffIds()[0];
+	}
+
+	for (const canvas of [imageCanvas, overlayCanvas]) {
+		canvas.width = meta.width;
+		canvas.height = meta.height;
+	}
+
+	imageCtx.drawImage(img, 0, 0);
+	overlayData = overlayCtx.createImageData(meta.width, meta.height);
+	overlay32 = new Uint32Array(overlayData.data.buffer);
+
+	$("empty").style.display = "none";
+	$("stage").style.display = "";
+	$("title").textContent = name;
+	$("position").textContent = `${index + 1} of ${state.images.length}`;
+
+	fillCategorySelects();
+	computeAreas();
+	renderAll();
+	refreshPanel();
+	setDirty(false);
+	renderList();
+
+	if (!sameSize) {
+		fit();
+	}
+
+	document.querySelector("#list li.current")?.scrollIntoView({block: "nearest"});
+}
+
+function visibleImages() {
+	const onlyUnlabeled = $("unlabeled").checked;
+	return state.images.map((img, i) => ({...img, i})).filter((img) => !onlyUnlabeled || !img.labeled || img.i === state.index);
+}
+
+function classKey(seg) {
+	return seg.iscrowd ? `${seg.category_id}c` : `${seg.category_id}`;
+}
+
+function isMatch(name) {
+	const key = $("highlight").value;
+	return !!key && (state.classes[name] || []).includes(key);
+}
+
+function renderList() {
+	renderMatchCount();
+	const list = $("list");
+	list.replaceChildren();
+
+	for (const img of visibleImages()) {
+		const li = document.createElement("li");
+		li.textContent = img.name;
+		li.classList.toggle("labeled", img.labeled);
+		li.classList.toggle("current", img.i === state.index);
+		li.classList.toggle("match", isMatch(img.name));
+		li.addEventListener("click", () => openImage(img.i));
+		list.append(li);
+	}
+}
+
+function step(delta, matchesOnly) {
+	const visible = visibleImages().filter((img) => !matchesOnly || isMatch(img.name) || img.i === state.index).map((img) => img.i);
+	const pos = visible.indexOf(state.index);
+
+	if (pos === -1) {
+		openImage(visible[0] ?? -1);
+	} else {
+		openImage(visible[pos + delta] ?? -1);
+	}
+}
+
+async function loadSplit(split) {
+	if (!(await confirmLeave())) {
+		$("split").value = state.split;
+		return;
+	}
+
+	state.split = split;
+	state.images = await fetchJson(`/api/images?split=${encodeURIComponent(split)}`);
+	state.index = -1;
+	state.ids = null;
+	state.dirty = false;
+	$("stage").style.display = "none";
+	$("empty").style.display = "";
+	$("empty").textContent = state.images.length ? "Pick an image from the list on the left." : "This folder has no images in its images/ subfolder.";
+	$("title").textContent = "No image open";
+	$("position").textContent = "";
+	setDirty(false);
+	state.classes = {};
+	renderList();
+	loadClasses(split);
+	openImage(0);
+}
+
+async function loadClasses(split) {
+	const select = $("highlight");
+	select.disabled = true;
+	const {categories, images} = await fetchJson(`/api/classes?split=${encodeURIComponent(split)}`);
+
+	if (split !== state.split) {
+		return;
+	}
+
+	const previous = select.value;
+	select.replaceChildren(new Option("Highlight: none", ""));
+
+	for (const cat of categories) {
+		select.append(new Option(cat.name, `${cat.id}`));
+	}
+
+	for (const cat of categories.filter((c) => c.isthing)) {
+		select.append(new Option(`${cat.name} (crowd)`, `${cat.id}c`));
+	}
+
+	select.value = [...select.options].some((o) => o.value === previous) ? previous : "";
+	select.disabled = false;
+	state.classes = images;
+	renderList();
+}
+
+function renderMatchCount() {
+	const count = state.images.filter((img) => isMatch(img.name)).length;
+	$("matchCount").textContent = $("highlight").value ? `${count} image${count === 1 ? "" : "s"}` : "";
+}
+
+document.addEventListener("keydown", (e) => {
+	const ctrl = e.ctrlKey || e.metaKey;
+	const key = e.key.toLowerCase();
+
+	if (ctrl && key === "s") {
+		e.preventDefault();
+		save();
+		return;
+	}
+
+	if (e.target.matches("select")) {
+		return;
+	}
+
+	if (ctrl && key === "z" && !e.shiftKey) {
+		e.preventDefault();
+		restore(state.undo, state.redo);
+	} else if (ctrl && (key === "y" || (key === "z" && e.shiftKey))) {
+		e.preventDefault();
+		restore(state.redo, state.undo);
+	} else if (ctrl) {
+		return;
+	} else if (key === " ") {
+		e.preventDefault();
+
+		if (!spaceHeld) {
+			spaceHeld = true;
+			$("view").classList.add("panning");
+			updateBrushCursor();
+		}
+	} else if (key === "a" || key === "arrowleft") {
+		step(-1, e.shiftKey);
+	} else if (key === "d" || key === "arrowright") {
+		step(1, e.shiftKey);
+	} else if (["1", "2", "3"].includes(key) && state.ids) {
+		const id = stuffIds()[Number(key) - 1];
+
+		if (id !== undefined) {
+			setActive(id);
+		}
+	} else if (key === "e" && state.ids) {
+		setActive(0);
+	} else if (key === "n") {
+		createInstance(false);
+	} else if (key === "b") {
+		setTool("brush");
+	} else if (key === "g") {
+		setTool("fill");
+	} else if (key === "x") {
+		setTool("sam");
+	} else if (key === "[") {
+		setBrush(state.brush / 1.25);
+	} else if (key === "]") {
+		setBrush(Math.max(state.brush + 1, state.brush * 1.25));
+	} else if (key === "v") {
+		const views = ["panoptic", "semantic", "image"];
+		setView(views[(views.indexOf(state.view) + 1) % views.length]);
+	} else if (key === "f") {
+		fit();
+	}
+});
+
+document.addEventListener("keyup", (e) => {
+	if (e.key === " ") {
+		spaceHeld = false;
+		$("view").classList.toggle("panning", !!pan);
+		updateBrushCursor();
+	}
+});
+
+window.addEventListener("beforeunload", (e) => {
+	if (state.dirty) {
+		e.preventDefault();
+	}
+});
+
+window.addEventListener("resize", () => {
+	fit();
+	scheduleOutline();
+});
+
+$("views").addEventListener("click", (e) => e.target.dataset.view && setView(e.target.dataset.view));
+$("toolButtons").addEventListener("click", (e) => e.target.dataset.tool && setTool(e.target.dataset.tool));
+$("opacity").addEventListener("input", (e) => setOpacity(e.target.value));
+$("samThreshold").addEventListener("input", (e) => setSamThreshold(e.target.value));
+$("size").addEventListener("input", (e) => setBrush(sliderToBrush(Number(e.target.value))));
+$("reclass").addEventListener("change", (e) => {
+	e.target.blur();
+	reclassify(Number(e.target.value));
+});
+$("newClass").addEventListener("change", (e) => e.target.blur());
+$("delete").addEventListener("click", clearSegment);
+$("newInstance").addEventListener("click", () => createInstance(false));
+$("newCrowd").addEventListener("click", () => createInstance(true));
+$("save").addEventListener("click", save);
+$("undo").addEventListener("click", () => restore(state.undo, state.redo));
+$("redo").addEventListener("click", () => restore(state.redo, state.undo));
+$("highlight").addEventListener("change", (e) => {
+	e.target.blur();
+	renderList();
+});
+$("unlabeled").addEventListener("change", renderList);
+$("split").addEventListener("change", (e) => loadSplit(e.target.value));
+
+async function init() {
+	setView("panoptic");
+	setTool("brush");
+	setBrush(12);
+	setOpacity(0.5);
+	setSamThreshold($("samThreshold").value);
+
+	const {root, splits} = await fetchJson("/api/splits");
+	$("root").textContent = root;
+
+	for (const split of splits) {
+		$("split").append(new Option(split === "." ? "(root folder)" : split, split));
+	}
+
+	loadSplit(splits[0]);
+}
+
+init();
+</script>
+</body>
+</html>
