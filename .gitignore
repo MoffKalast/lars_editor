@@ -1,5 +1,5 @@
 .venv/
 sam3repo/
-LaRS_v1.1.0/
+LaRS_v1.2.0/
 *.pt
 __pycache__/

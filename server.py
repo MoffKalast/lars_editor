@@ -325,7 +325,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
 	global ROOT, SAM_URL
 	parser = argparse.ArgumentParser()
-	parser.add_argument("root", nargs="?", default="LaRS_v1.1.0")
+	parser.add_argument("root", nargs="?", default="LaRS_v1.2.0")
 	parser.add_argument("--port", type=int, default=8000)
 	parser.add_argument("--sam", default="http://127.0.0.1:8001")
 	args = parser.parse_args()
@@ -337,7 +337,7 @@ def main():
 		raise SystemExit(f"no folder with an images/ subfolder found in {ROOT}")
 
 	print(f"http://localhost:{args.port}")
-	ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
+	ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
 
 
 if __name__ == "__main__":
