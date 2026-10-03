@@ -117,9 +117,7 @@ def read_ids(sdir, name):
 	return rgb[..., 0] + (rgb[..., 1] << 8) + (rgb[..., 2] << 16)
 
 
-def load_meta(sdir, name):
-	data = load_annotations(sdir)
-	ids = read_ids(sdir, name)
+def segment_list(data, name, ids):
 	cat_ids = {c["id"] for c in data["categories"]}
 	ann = find_annotation(data, name)
 	known = {s["id"]: s for s in ann["segments_info"]} if ann else {}
@@ -135,8 +133,14 @@ def load_meta(sdir, name):
 			category = sid & 0xFFFF if (sid & 0xFFFF) in cat_ids else 19
 			segments.append({"id": sid, "category_id": category, "iscrowd": 0})
 
+	return segments
+
+
+def load_meta(sdir, name):
+	data = load_annotations(sdir)
+	ids = read_ids(sdir, name)
 	height, width = ids.shape
-	return {"width": width, "height": height, "categories": data["categories"], "segments": segments}, ids
+	return {"width": width, "height": height, "categories": data["categories"], "segments": segment_list(data, name, ids)}, ids
 
 
 def mask_classes(path):
@@ -175,11 +179,7 @@ def image_classes(sdir):
 	return {"categories": data["categories"], "images": result}
 
 
-def save_image(sdir, name, ids, segment_map):
-	data = load_annotations(sdir)
-	categories = {c["id"]: c for c in data["categories"]}
-	height, width = ids.shape
-
+def derive(ids, segment_map, categories):
 	unique, inverse = np.unique(ids, return_inverse=True)
 	inverse = inverse.reshape(ids.shape)
 	semantic_lut = np.full(len(unique), IGNORE_SEMANTIC, dtype=np.uint8)
@@ -198,18 +198,35 @@ def save_image(sdir, name, ids, segment_map):
 		bbox = [x0, y0, int(xs.max()) - x0 + 1, int(ys.max()) - y0 + 1]
 		segments_info.append({"id": sid, "category_id": segment["category_id"], "area": int(len(xs)), "bbox": bbox, "iscrowd": int(segment["iscrowd"])})
 
+	return semantic_lut[inverse], segments_info
+
+
+def add_entry(data, name, ids, segments_info):
+	height, width = ids.shape
+	image = next((img for img in data["images"] if img["file_name"] == name), None)
+
+	if image is None:
+		image = {"id": max((img["id"] for img in data["images"]), default=0) + 1, "width": width, "height": height, "file_name": name}
+		data["images"].append(image)
+
+	data["annotations"].append({"image_id": image["id"], "file_name": mask_name(name), "segments_info": segments_info})
+
+
+def save_image(sdir, name, ids, segment_map):
+	data = load_annotations(sdir)
+	categories = {c["id"]: c for c in data["categories"]}
+	semantic, segments_info = derive(ids, segment_map, categories)
+
 	rgb = np.stack([ids & 255, (ids >> 8) & 255, (ids >> 16) & 255], axis=-1).astype(np.uint8)
 	(sdir / "panoptic_masks").mkdir(exist_ok=True)
 	(sdir / "semantic_masks").mkdir(exist_ok=True)
 	Image.fromarray(rgb, "RGB").save(sdir / "panoptic_masks" / mask_name(name))
-	Image.fromarray(semantic_lut[inverse], "L").save(sdir / "semantic_masks" / mask_name(name))
+	Image.fromarray(semantic, "L").save(sdir / "semantic_masks" / mask_name(name))
 
 	ann = find_annotation(data, name)
 
 	if ann is None:
-		image_id = max((img["id"] for img in data["images"]), default=0) + 1
-		data["images"].append({"id": image_id, "width": width, "height": height, "file_name": name})
-		data["annotations"].append({"image_id": image_id, "file_name": mask_name(name), "segments_info": segments_info})
+		add_entry(data, name, ids, segments_info)
 	else:
 		ann["segments_info"] = segments_info
 
@@ -221,6 +238,40 @@ def save_image(sdir, name, ids, segment_map):
 	if Path(name).stem not in stems:
 		with open(list_path, "a") as f:
 			f.write(Path(name).stem + "\n")
+
+
+def sync_split(sdir):
+	names = list_images(sdir)
+	(sdir / "image_list.txt").write_text("".join(Path(name).stem + "\n" for name in names))
+
+	data = load_annotations(sdir)
+	categories = {c["id"]: c for c in data["categories"]}
+	annotated = {ann["file_name"] for ann in data["annotations"]}
+	(sdir / "semantic_masks").mkdir(exist_ok=True)
+	added = 0
+
+	for name in names:
+		semantic_path = sdir / "semantic_masks" / mask_name(name)
+		has_entry = mask_name(name) in annotated
+
+		if not (sdir / "panoptic_masks" / mask_name(name)).exists() or (has_entry and semantic_path.exists()):
+			continue
+
+		ids = read_ids(sdir, name)
+		segment_map = {s["id"]: s for s in segment_list(data, name, ids)}
+		semantic, segments_info = derive(ids, segment_map, categories)
+
+		if not semantic_path.exists():
+			Image.fromarray(semantic, "L").save(semantic_path)
+			print(f"{sdir.name}/{name}: semantic mask written")
+
+		if not has_entry:
+			add_entry(data, name, ids, segments_info)
+			print(f"{sdir.name}/{name}: annotation entry added")
+			added += 1
+
+	if added:
+		save_annotations(sdir, data)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -335,6 +386,9 @@ def main():
 
 	if not find_splits(ROOT):
 		raise SystemExit(f"no folder with an images/ subfolder found in {ROOT}")
+
+	for split in find_splits(ROOT):
+		sync_split(ROOT / split)
 
 	print(f"http://localhost:{args.port}")
 	ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
