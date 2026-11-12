@@ -112,7 +112,7 @@ Both scripts run without arguments; these options override the defaults.
 
 | Script | Option | Default |
 | --- | --- | --- |
-| `server.py` | dataset folder (positional) | `LaRS_v1.1.0` |
+| `server.py` | dataset folder (positional) | first `LaRS_*` folder next to `server.py` |
 | `server.py` | `--port` | `8000` |
 | `server.py` | `--sam` | `http://127.0.0.1:8001` |
 | `sam_server.py` | `--checkpoint` | `sam3.pt` |
@@ -120,7 +120,13 @@ Both scripts run without arguments; these options override the defaults.
 
 Example: `python server.py /data/LaRS_v1.1.0 --port 8080`.
 
-The dataset folder must contain one or more split folders (e.g. `train`, `val`), each with an `images` subfolder. Masks are written next to them in `panoptic_masks`, `semantic_masks` and `panoptic_annotations.json`.
+The dataset folder must contain one or more split folders (e.g. `train`, `val`), each with an `images` subfolder. Masks are written next to them in `panoptic_masks`, `semantic_masks` and `panoptic_annotations.json`. Without an argument, the editor uses the first folder next to `server.py` whose name starts with `LaRS_`, in natural sort order (so `LaRS_v1.2.0` comes before `LaRS_v1.10.0`).
+
+## Renaming and deleting images
+
+"Rename" (`F2`) renames the current image together with its panoptic and semantic masks, and updates `panoptic_annotations.json` and `image_list.txt`. Only the name changes; the extension stays the same.
+
+"Delete" moves the image and its masks into a `_deleted` folder at the top of the dataset, keeping the split structure (e.g. `_deleted/train/images/...`). Its annotation entries are kept in `_deleted/<split>/panoptic_annotations.json`, and the editor ignores the `_deleted` folder. To undo a deletion, move the files back to their original folders and restart the editor; it restores the annotation entry from `_deleted` on startup.
 
 ## Using the SAM tool
 

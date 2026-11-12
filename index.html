@@ -422,6 +422,8 @@ label {
 	<button id="undo" disabled>Undo</button>
 	<button id="redo" disabled>Redo</button>
 	<button id="save" disabled>Save</button>
+	<button id="renameImage" disabled title="Rename image (F2)">Rename</button>
+	<button id="deleteImage" disabled title="Move image and masks to _deleted">Delete</button>
 </header>
 
 <main id="view">
@@ -527,6 +529,7 @@ label {
 			<dt>Space-drag, middle-drag</dt><dd>Pan</dd>
 			<dt>Ctrl Z / Ctrl Y</dt><dd>Undo / redo</dd>
 			<dt>Ctrl S</dt><dd>Save</dd>
+			<dt>F2</dt><dd>Rename image</dd>
 		</dl>
 	</section>
 </aside>
@@ -798,6 +801,8 @@ function setDirty(dirty) {
 	$("state").classList.toggle("dirty", dirty);
 	$("save").classList.toggle("dirty", dirty);
 	$("save").disabled = !state.ids;
+	$("renameImage").disabled = !state.ids;
+	$("deleteImage").disabled = !state.ids;
 	$("undo").disabled = !state.undo.length;
 	$("redo").disabled = !state.redo.length;
 }
@@ -1634,6 +1639,59 @@ async function save() {
 	return true;
 }
 
+async function renameImage() {
+	if (!state.ids) {
+		return;
+	}
+
+	const name = state.images[state.index].name;
+	const dot = name.lastIndexOf(".");
+	const to = prompt("New name (without extension):", name.slice(0, dot))?.trim();
+
+	if (!to || to === name.slice(0, dot)) {
+		return;
+	}
+
+	const res = await fetch(`/api/rename?${query(name)}&to=${encodeURIComponent(to)}`, {method: "POST"});
+
+	if (!res.ok) {
+		alert(`Renaming failed: ${(await res.json()).error}`);
+		return;
+	}
+
+	const newName = to + name.slice(dot);
+	state.classes[newName] = state.classes[name];
+	delete state.classes[name];
+	state.images = await fetchJson(`/api/images?split=${encodeURIComponent(state.split)}`);
+	state.index = state.images.findIndex((img) => img.name === newName);
+	$("title").textContent = newName;
+	$("position").textContent = `${state.index + 1} of ${state.images.length}`;
+	renderList();
+	document.querySelector("#list li.current")?.scrollIntoView({block: "nearest"});
+}
+
+async function deleteImage() {
+	if (!state.ids) {
+		return;
+	}
+
+	const name = state.images[state.index].name;
+
+	if (!confirm(`Move ${name} and its masks to _deleted?${state.dirty ? " Its unsaved changes will be lost." : ""}`)) {
+		return;
+	}
+
+	const res = await fetch(`/api/delete?${query(name)}`, {method: "POST"});
+
+	if (!res.ok) {
+		alert(`Deleting failed: ${(await res.json()).error}`);
+		return;
+	}
+
+	setDirty(false);
+	loadSplit(state.split, state.index);
+}
+
 async function confirmLeave() {
 	if (!state.dirty) {
 		return true;
@@ -1751,7 +1809,7 @@ function step(delta, matchesOnly) {
 	}
 }
 
-async function loadSplit(split) {
+async function loadSplit(split, index = 0) {
 	if (!(await confirmLeave())) {
 		$("split").value = state.split;
 		return;
@@ -1771,7 +1829,7 @@ async function loadSplit(split) {
 	state.classes = {};
 	renderList();
 	loadClasses(split);
-	openImage(0);
+	openImage(Math.min(index, state.images.length - 1));
 }
 
 async function loadClasses(split) {
@@ -1872,6 +1930,9 @@ document.addEventListener("keydown", (e) => {
 		setView(views[(views.indexOf(state.view) + 1) % views.length]);
 	} else if (key === "f") {
 		fit();
+	} else if (key === "f2") {
+		e.preventDefault();
+		renameImage();
 	}
 });
 
@@ -1912,6 +1973,8 @@ $("delete").addEventListener("click", clearSegment);
 $("newInstance").addEventListener("click", () => createInstance(false));
 $("newCrowd").addEventListener("click", () => createInstance(true));
 $("save").addEventListener("click", save);
+$("renameImage").addEventListener("click", renameImage);
+$("deleteImage").addEventListener("click", deleteImage);
 $("undo").addEventListener("click", () => restore(state.undo, state.redo));
 $("redo").addEventListener("click", () => restore(state.redo, state.undo));
 $("highlight").addEventListener("change", (e) => {

@@ -31,6 +31,7 @@ LARS_CATEGORIES = [
 
 SEMANTIC_VALUES = {"obstacle": 0, "water": 1, "sky": 2}
 IGNORE_SEMANTIC = 255
+TRASH = "_deleted"
 
 ROOT = None
 SAM_URL = None
@@ -44,7 +45,7 @@ def find_splits(root):
 		splits.append(".")
 
 	for child in sorted(root.iterdir()):
-		if child.is_dir() and (child / "images").is_dir():
+		if child.is_dir() and child.name != TRASH and (child / "images").is_dir():
 			splits.append(child.name)
 
 	return splits
@@ -74,6 +75,14 @@ def image_path(sdir, name):
 
 def mask_name(name):
 	return Path(name).stem + ".png"
+
+
+def trash_dir(sdir):
+	return ROOT / TRASH / sdir.relative_to(ROOT)
+
+
+def image_files(sdir, name):
+	return [sdir / "images" / name, sdir / "panoptic_masks" / mask_name(name), sdir / "semantic_masks" / mask_name(name)]
 
 
 def load_annotations(sdir):
@@ -240,11 +249,72 @@ def save_image(sdir, name, ids, segment_map):
 			f.write(Path(name).stem + "\n")
 
 
-def sync_split(sdir):
-	names = list_images(sdir)
-	(sdir / "image_list.txt").write_text("".join(Path(name).stem + "\n" for name in names))
+def write_image_list(sdir):
+	(sdir / "image_list.txt").write_text("".join(Path(name).stem + "\n" for name in list_images(sdir)))
+
+
+def rename_image(sdir, name, stem):
+	image_path(sdir, name)
+
+	if not re.fullmatch(r"[\w-][\w.-]*", stem):
+		raise ValueError(f"invalid name: {stem}")
+
+	if any(Path(n).stem == stem for n in list_images(sdir)):
+		raise ValueError(f"name already taken: {stem}")
+
+	new = stem + Path(name).suffix
+	moves = [(src, dst) for src, dst in zip(image_files(sdir, name), image_files(sdir, new)) if src.exists()]
+
+	if any(dst.exists() for _, dst in moves):
+		raise ValueError(f"files for {stem} already exist")
+
+	for src, dst in moves:
+		src.rename(dst)
 
 	data = load_annotations(sdir)
+
+	for image in data["images"]:
+		if image["file_name"] == name:
+			image["file_name"] = new
+
+	for ann in data["annotations"]:
+		if ann["file_name"] == mask_name(name):
+			ann["file_name"] = mask_name(new)
+
+	save_annotations(sdir, data)
+	write_image_list(sdir)
+
+
+def delete_image(sdir, name):
+	image_path(sdir, name)
+	data = load_annotations(sdir)
+	image = next((img for img in data["images"] if img["file_name"] == name), None)
+	ann = find_annotation(data, name)
+	data["images"] = [img for img in data["images"] if img is not image]
+	data["annotations"] = [a for a in data["annotations"] if a is not ann]
+
+	tdir = trash_dir(sdir)
+	trash = load_annotations(tdir)
+	trash["categories"] = data["categories"]
+	trash["images"] = [img for img in trash["images"] if img["file_name"] != name] + ([image] if image else [])
+	trash["annotations"] = [a for a in trash["annotations"] if a["file_name"] != mask_name(name)] + ([ann] if ann else [])
+
+	for src in image_files(sdir, name):
+		if src.exists():
+			(tdir / src.parent.name).mkdir(parents=True, exist_ok=True)
+			os.replace(src, tdir / src.parent.name / src.name)
+
+	save_annotations(tdir, trash)
+	save_annotations(sdir, data)
+	write_image_list(sdir)
+
+
+def sync_split(sdir):
+	names = list_images(sdir)
+	write_image_list(sdir)
+
+	data = load_annotations(sdir)
+	trash = load_annotations(trash_dir(sdir))
 	categories = {c["id"]: c for c in data["categories"]}
 	annotated = {ann["file_name"] for ann in data["annotations"]}
 	(sdir / "semantic_masks").mkdir(exist_ok=True)
@@ -258,7 +328,8 @@ def sync_split(sdir):
 			continue
 
 		ids = read_ids(sdir, name)
-		segment_map = {s["id"]: s for s in segment_list(data, name, ids)}
+		source = trash if find_annotation(trash, name) else data
+		segment_map = {s["id"]: s for s in segment_list(source, name, ids)}
 		semantic, segments_info = derive(ids, segment_map, categories)
 
 		if not semantic_path.exists():
@@ -350,6 +421,16 @@ class Handler(BaseHTTPRequestHandler):
 				self.sam(p)
 				return
 
+			if route == "/api/rename":
+				rename_image(split_dir(p["split"]), p["name"], p["to"])
+				self.send(200, {"ok": True})
+				return
+
+			if route == "/api/delete":
+				delete_image(split_dir(p["split"]), p["name"])
+				self.send(200, {"ok": True})
+				return
+
 			if route != "/api/save":
 				self.send(404, {"error": "not found"})
 				return
@@ -369,19 +450,28 @@ class Handler(BaseHTTPRequestHandler):
 
 			save_image(sdir, p["name"], ids, segment_map)
 			self.send(200, {"ok": True})
-		except (ValueError, KeyError) as e:
+		except (ValueError, KeyError, OSError) as e:
 			self.send(400, {"error": str(e)})
+
+
+def default_root():
+	found = sorted((p for p in Path(__file__).parent.glob("LaRS_*") if p.is_dir()), key=lambda p: natural_key(p.name))
+
+	if not found:
+		raise SystemExit("no LaRS_* folder found next to server.py, pass the dataset folder as an argument")
+
+	return found[0]
 
 
 def main():
 	global ROOT, SAM_URL
 	parser = argparse.ArgumentParser()
-	parser.add_argument("root", nargs="?", default="LaRS_v1.6.1")
+	parser.add_argument("root", nargs="?")
 	parser.add_argument("--port", type=int, default=8000)
 	parser.add_argument("--sam", default="http://127.0.0.1:8001")
 	args = parser.parse_args()
 
-	ROOT = Path(args.root).resolve()
+	ROOT = Path(args.root or default_root()).resolve()
 	SAM_URL = args.sam
 
 	if not find_splits(ROOT):
