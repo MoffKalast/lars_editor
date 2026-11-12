@@ -376,7 +376,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
 	global ROOT, SAM_URL
 	parser = argparse.ArgumentParser()
-	parser.add_argument("root", nargs="?", default="LaRS_v1.2.0")
+	parser.add_argument("root", nargs="?", default="LaRS_v1.6.1")
 	parser.add_argument("--port", type=int, default=8000)
 	parser.add_argument("--sam", default="http://127.0.0.1:8001")
 	args = parser.parse_args()
