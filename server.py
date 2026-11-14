@@ -249,6 +249,20 @@ def save_image(sdir, name, ids, segment_map):
 			f.write(Path(name).stem + "\n")
 
 
+def read_saved(sdir):
+	path = sdir / "saved_images.txt"
+	return set(path.read_text().splitlines()) if path.exists() else set()
+
+
+def set_saved(sdir, name, saved):
+	stems = read_saved(sdir) - {Path(name).stem}
+
+	if saved:
+		stems.add(Path(name).stem)
+
+	(sdir / "saved_images.txt").write_text("".join(stem + "\n" for stem in sorted(stems, key=natural_key)))
+
+
 def write_image_list(sdir):
 	(sdir / "image_list.txt").write_text("".join(Path(name).stem + "\n" for name in list_images(sdir)))
 
@@ -283,6 +297,7 @@ def rename_image(sdir, name, stem):
 
 	save_annotations(sdir, data)
 	write_image_list(sdir)
+	set_saved(sdir, name, False)
 
 
 def delete_image(sdir, name):
@@ -307,6 +322,7 @@ def delete_image(sdir, name):
 	save_annotations(tdir, trash)
 	save_annotations(sdir, data)
 	write_image_list(sdir)
+	set_saved(sdir, name, False)
 
 
 def sync_split(sdir):
@@ -381,7 +397,8 @@ class Handler(BaseHTTPRequestHandler):
 				sdir = split_dir(p["split"])
 				masks = sdir / "panoptic_masks"
 				done = {f.name for f in masks.iterdir()} if masks.is_dir() else set()
-				self.send(200, [{"name": n, "labeled": mask_name(n) in done} for n in list_images(sdir)])
+				saved = read_saved(sdir)
+				self.send(200, [{"name": n, "labeled": mask_name(n) in done, "saved": Path(n).stem in saved} for n in list_images(sdir)])
 			elif route == "/api/classes":
 				self.send(200, image_classes(split_dir(p["split"])))
 			elif route == "/api/image":
@@ -449,6 +466,7 @@ class Handler(BaseHTTPRequestHandler):
 				raise ValueError(f"segments without category: {sorted(missing)}")
 
 			save_image(sdir, p["name"], ids, segment_map)
+			set_saved(sdir, p["name"], True)
 			self.send(200, {"ok": True})
 		except (ValueError, KeyError, OSError) as e:
 			self.send(400, {"error": str(e)})

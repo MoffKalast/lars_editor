@@ -122,6 +122,12 @@ Example: `python server.py /data/LaRS_v1.1.0 --port 8080`.
 
 The dataset folder must contain one or more split folders (e.g. `train`, `val`), each with an `images` subfolder. Masks are written next to them in `panoptic_masks`, `semantic_masks` and `panoptic_annotations.json`. Without an argument, the editor uses the first folder next to `server.py` whose name starts with `LaRS_`, in natural sort order (so `LaRS_v1.2.0` comes before `LaRS_v1.10.0`).
 
+## Tracking reviewed images
+
+Every save, including the one from "Save when switching image", adds the image to `saved_images.txt` in its split folder, and the image list shows a green dot on the right of each saved image. "Only unsaved" hides the saved ones. Saving an untouched image with Ctrl+S marks it as reviewed. Renaming or deleting an image removes it from the list, so it shows up for a second look.
+
+Editor settings (view, opacity, tool, brush size, SAM confidence, new object class, the checkboxes, highlight, split and the last opened image per split) are stored in the browser, so each browser keeps its own.
+
 ## Renaming and deleting images
 
 "Rename" (`F2`) renames the current image together with its panoptic and semantic masks, and updates `panoptic_annotations.json` and `image_list.txt`. Only the name changes; the extension stays the same.

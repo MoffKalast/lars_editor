@@ -146,6 +146,16 @@ button.on {
 	border: 1px solid var(--muted);
 }
 
+#list li.saved::after {
+	content: "";
+	flex: none;
+	width: 7px;
+	height: 7px;
+	margin-left: auto;
+	border-radius: 50%;
+	background: #4cd964;
+}
+
 #list li.labeled::before {
 	background: var(--accent);
 	border-color: var(--accent);
@@ -191,6 +201,7 @@ button.on {
 	overflow: hidden;
 	background: #0f171d;
 	cursor: none;
+	user-select: none;
 }
 
 #view.panning {
@@ -409,6 +420,7 @@ label {
 			<span id="matchCount"></span>
 		</div>
 		<label><input id="unlabeled" type="checkbox"> Only unlabeled</label>
+		<label><input id="unsaved" type="checkbox"> Only unsaved</label>
 	</div>
 	<ul id="list"></ul>
 </aside>
@@ -423,7 +435,7 @@ label {
 	<button id="redo" disabled>Redo</button>
 	<button id="save" disabled>Save</button>
 	<button id="renameImage" disabled title="Rename image (F2)">Rename</button>
-	<button id="deleteImage" disabled title="Move image and masks to _deleted">Delete</button>
+	<button id="deleteImage" disabled title="Move image and masks to _deleted (Delete)">Delete</button>
 </header>
 
 <main id="view">
@@ -530,6 +542,7 @@ label {
 			<dt>Ctrl Z / Ctrl Y</dt><dd>Undo / redo</dd>
 			<dt>Ctrl S</dt><dd>Save</dd>
 			<dt>F2</dt><dd>Rename image</dd>
+			<dt>Delete</dt><dd>Move image to _deleted</dd>
 		</dl>
 	</section>
 </aside>
@@ -560,6 +573,13 @@ const state = {
 	ty: 0,
 	areas: new Map(),
 };
+
+const settings = JSON.parse(localStorage.getItem("lars_editor_settings") ?? "{}");
+
+function remember(key, value) {
+	settings[key] = value;
+	localStorage.setItem("lars_editor_settings", JSON.stringify(settings));
+}
 
 const UNDO_LIMIT = 20;
 const MAX_INSTANCES = 255;
@@ -772,7 +792,7 @@ function refreshPanel() {
 function fillCategorySelects() {
 	const reclass = $("reclass");
 	const newClass = $("newClass");
-	const previous = newClass.value;
+	const previous = settings.newClass;
 	reclass.replaceChildren();
 	newClass.replaceChildren();
 
@@ -784,7 +804,7 @@ function fillCategorySelects() {
 		}
 	}
 
-	if (previous) {
+	if ([...newClass.options].some((o) => o.value === previous)) {
 		newClass.value = previous;
 	}
 }
@@ -1452,6 +1472,7 @@ let pan = null;
 let spaceHeld = false;
 
 $("view").addEventListener("contextmenu", (e) => e.preventDefault());
+$("view").addEventListener("dragstart", (e) => e.preventDefault());
 
 $("view").addEventListener("pointerdown", (e) => {
 	if (!state.ids) {
@@ -1515,7 +1536,7 @@ $("view").addEventListener("pointermove", (e) => {
 	updateHover();
 });
 
-$("view").addEventListener("pointerup", () => {
+function endPointer() {
 	if (pan) {
 		pan = null;
 		$("view").classList.toggle("panning", spaceHeld);
@@ -1531,7 +1552,10 @@ $("view").addEventListener("pointerup", () => {
 	}
 
 	updateBrushCursor();
-});
+}
+
+$("view").addEventListener("pointerup", endPointer);
+$("view").addEventListener("pointercancel", endPointer);
 
 $("view").addEventListener("pointerleave", () => {
 	mouse = null;
@@ -1568,11 +1592,13 @@ function setBrush(size) {
 	state.brush = Math.min(400, Math.max(1, Math.round(size)));
 	$("size").value = brushToSlider(state.brush);
 	$("sizeValue").textContent = `${state.brush}px`;
+	remember("brush", state.brush);
 	updateBrushCursor();
 }
 
 function setTool(tool) {
 	state.tool = tool;
+	remember("tool", tool);
 
 	for (const b of $("toolButtons").children) {
 		b.classList.toggle("on", b.dataset.tool === tool);
@@ -1584,6 +1610,7 @@ function setTool(tool) {
 
 function setView(view) {
 	state.view = view;
+	remember("view", view);
 
 	for (const b of $("views").children) {
 		b.classList.toggle("on", b.dataset.view === view);
@@ -1594,10 +1621,14 @@ function setView(view) {
 }
 
 function setSamThreshold(value) {
+	$("samThreshold").value = value;
+	remember("samThreshold", value);
 	$("samThresholdValue").textContent = `${Math.round(value * 100)}%`;
 }
 
 function setOpacity(value) {
+	$("opacity").value = value;
+	remember("opacity", value);
 	overlayCanvas.style.opacity = value;
 	$("opacityValue").textContent = `${Math.round(value * 100)}%`;
 }
@@ -1633,6 +1664,7 @@ async function save() {
 	}
 
 	state.images[state.index].labeled = true;
+	state.images[state.index].saved = true;
 	state.classes[name] = [...new Set([...state.areas.keys()].filter((id) => id !== 0).map((id) => classKey(state.segMap.get(id))))];
 	renderList();
 	setDirty(false);
@@ -1664,6 +1696,7 @@ async function renameImage() {
 	delete state.classes[name];
 	state.images = await fetchJson(`/api/images?split=${encodeURIComponent(state.split)}`);
 	state.index = state.images.findIndex((img) => img.name === newName);
+	remember("images", {...settings.images, [state.split]: newName});
 	$("title").textContent = newName;
 	$("position").textContent = `${state.index + 1} of ${state.images.length}`;
 	renderList();
@@ -1717,6 +1750,7 @@ async function openImage(index) {
 	const sameSize = meta.width === state.width && meta.height === state.height;
 
 	state.index = index;
+	remember("images", {...settings.images, [state.split]: name});
 	state.width = meta.width;
 	state.height = meta.height;
 	state.categories = meta.categories;
@@ -1770,7 +1804,8 @@ async function openImage(index) {
 
 function visibleImages() {
 	const onlyUnlabeled = $("unlabeled").checked;
-	return state.images.map((img, i) => ({...img, i})).filter((img) => !onlyUnlabeled || !img.labeled || img.i === state.index);
+	const onlyUnsaved = $("unsaved").checked;
+	return state.images.map((img, i) => ({...img, i})).filter((img) => img.i === state.index || ((!onlyUnlabeled || !img.labeled) && (!onlyUnsaved || !img.saved)));
 }
 
 function classKey(seg) {
@@ -1791,6 +1826,7 @@ function renderList() {
 		const li = document.createElement("li");
 		li.textContent = img.name;
 		li.classList.toggle("labeled", img.labeled);
+		li.classList.toggle("saved", img.saved);
 		li.classList.toggle("current", img.i === state.index);
 		li.classList.toggle("match", isMatch(img.name));
 		li.addEventListener("click", () => openImage(img.i));
@@ -1809,13 +1845,15 @@ function step(delta, matchesOnly) {
 	}
 }
 
-async function loadSplit(split, index = 0) {
+async function loadSplit(split, index) {
 	if (!(await confirmLeave())) {
 		$("split").value = state.split;
 		return;
 	}
 
 	state.split = split;
+	$("split").value = split;
+	remember("split", split);
 	state.images = await fetchJson(`/api/images?split=${encodeURIComponent(split)}`);
 	state.index = -1;
 	state.ids = null;
@@ -1829,7 +1867,8 @@ async function loadSplit(split, index = 0) {
 	state.classes = {};
 	renderList();
 	loadClasses(split);
-	openImage(Math.min(index, state.images.length - 1));
+	const last = state.images.findIndex((img) => img.name === settings.images?.[split]);
+	openImage(Math.min(index ?? Math.max(last, 0), state.images.length - 1));
 }
 
 async function loadClasses(split) {
@@ -1841,7 +1880,7 @@ async function loadClasses(split) {
 		return;
 	}
 
-	const previous = select.value;
+	const previous = settings.highlight;
 	select.replaceChildren(new Option("Highlight: none", ""));
 
 	for (const cat of categories) {
@@ -1933,6 +1972,8 @@ document.addEventListener("keydown", (e) => {
 	} else if (key === "f2") {
 		e.preventDefault();
 		renameImage();
+	} else if (key === "delete") {
+		deleteImage();
 	}
 });
 
@@ -1979,17 +2020,27 @@ $("undo").addEventListener("click", () => restore(state.undo, state.redo));
 $("redo").addEventListener("click", () => restore(state.redo, state.undo));
 $("highlight").addEventListener("change", (e) => {
 	e.target.blur();
+	remember("highlight", e.target.value);
 	renderList();
 });
+$("newClass").addEventListener("change", (e) => remember("newClass", e.target.value));
+$("autosave").addEventListener("change", (e) => remember("autosave", e.target.checked));
+$("unlabeled").addEventListener("change", (e) => remember("unlabeled", e.target.checked));
+$("unsaved").addEventListener("change", (e) => remember("unsaved", e.target.checked));
 $("unlabeled").addEventListener("change", renderList);
+$("unsaved").addEventListener("change", renderList);
 $("split").addEventListener("change", (e) => loadSplit(e.target.value));
 
 async function init() {
-	setView("panoptic");
-	setTool("brush");
-	setBrush(12);
-	setOpacity(0.5);
-	setSamThreshold($("samThreshold").value);
+	setView(settings.view ?? "panoptic");
+	setTool(settings.tool ?? "brush");
+	setBrush(settings.brush ?? 12);
+	setOpacity(settings.opacity ?? 0.5);
+	setSamThreshold(settings.samThreshold ?? 0.5);
+
+	for (const id of ["autosave", "unlabeled", "unsaved"]) {
+		$(id).checked = settings[id] ?? false;
+	}
 
 	const {root, splits} = await fetchJson("/api/splits");
 	$("root").textContent = root;
@@ -1998,7 +2049,7 @@ async function init() {
 		$("split").append(new Option(split === "." ? "(root folder)" : split, split));
 	}
 
-	loadSplit(splits[0]);
+	loadSplit(splits.includes(settings.split) ? settings.split : splits[0]);
 }
 
 init();
